@@ -6,3 +6,4 @@ A companion repo for [How To Build a Melon Bot](https://medium.com/melonprotocol
 2. Run: yarn install
 3. Create .env file
 4. Copy the information from .env.example and modify to match fund info
+5. Run yarn dev
