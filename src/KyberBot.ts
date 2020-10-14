@@ -3,9 +3,8 @@ import {
   Accounting,
   Hub,
   Trading,
-  UniswapExchange,
-  UniswapTradingAdapter,
-  UniswapFactory,
+  KyberNetworkProxy,
+  KyberTradingAdapter,
   DeployedEnvironment,
   TokenDefinition,
   sameAddress,
@@ -24,7 +23,7 @@ interface PriceQueryResult {
   exchangeAddress: string;
 }
 
-export class UniswapBot {
+export class KyberBot {
   public static async create(hubAddress: string, tokenOneSymbol: string, tokenTwoSymbol: string) {
     const environment = createEnvironment();
     const hub = new Hub(environment, hubAddress);
@@ -39,16 +38,15 @@ export class UniswapBot {
     const trading = new Trading(environment, routes.trading);
     const accounting = new Accounting(environment, routes.accounting);
 
-    const adapterAddress = environment.deployment.melon.addr.UniswapAdapter;
-    const adapter = await UniswapTradingAdapter.create(environment, adapterAddress, trading);
+    const adapterAddress = environment.deployment.melon.addr.KyberAdapter;
+    const adapter = await KyberTradingAdapter.create(environment, adapterAddress, trading);
 
-    const factoryAddress = environment.deployment.uniswap.addr.UniswapFactory;
-    const factory = new UniswapFactory(environment, factoryAddress);
+    const exchangeAddress = environment.deployment.kyber.addr.KyberNetworkProxy;
 
     const tokenOne = environment.getToken(tokenOneSymbol);
     const tokenTwo = environment.getToken(tokenTwoSymbol);
 
-    return new this(environment, account, hub, trading, accounting, adapter, factory, tokenOne, tokenTwo);
+    return new this(environment, account, hub, trading, accounting, adapter, exchangeAddress, tokenOne, tokenTwo);
   }
 
   private constructor(
@@ -57,8 +55,8 @@ export class UniswapBot {
     public readonly hubContract: Hub,
     public readonly tradingContract: Trading,
     public readonly accountingContract: Accounting,
-    public readonly uniswapAdapterContract: UniswapTradingAdapter,
-    public readonly uniswapFactoryContract: UniswapFactory,
+    public readonly kyberAdapterContract: KyberTradingAdapter,
+    public readonly kyberExchangeAddress: string,
     public readonly tokenOne: TokenDefinition,
     public readonly tokenTwo: TokenDefinition
   ) {}
@@ -72,26 +70,18 @@ export class UniswapBot {
     const priceObject = await this.getPrice(baseCurrency, quoteCurrency, new BigNumber(baseQuantity));
 
     return this.makeTransaction(priceObject);
+    
   }
 
   public async getPrice(baseCurrency: TokenDefinition, quoteCurrency: TokenDefinition, baseQuantity: BigNumber) {
-    // Every uniswap exchange is WETH/someToken, and identified by the non-weth token
-    const exchangeToken = baseCurrency.symbol === 'WETH' ? quoteCurrency : baseCurrency;
-
-    // call the method to find the address
-    const exchangeAddress = await this.uniswapFactoryContract.getExchange(exchangeToken.address);
-
     // instantiate the exchange contract
-    const exchange = new UniswapExchange(this.environment, exchangeAddress);
+    const exchange = new KyberNetworkProxy(this.environment, this.kyberExchangeAddress);
 
     // call the correct method to get the price. If the base currency is WETH, you want to go ETH => token and vice versa
-    const quoteQuantity =
-      baseCurrency.symbol === 'WETH'
-        ? await exchange.getEthToTokenInputPrice(baseQuantity) // quantity passed is in WETH if you're trying to sell WETH for MLN
-        : await exchange.getTokenToEthInputPrice(baseQuantity); // quantity passed is in MLN if you're trying to sell MLN for WETH
+    const quoteQuantity = await exchange.getExpectedRate(baseCurrency.address, quoteCurrency.address, baseQuantity); // quantity passed is in WETH if you're trying to sell WETH for MLN
 
     // price will be important if you're doing any TA. My magicFunction doesn't use it but I've included it anyway.
-    const priceInBase = quoteQuantity.dividedBy(baseQuantity);
+    const priceInBase = quoteQuantity.expectedRate.dividedBy(baseQuantity);
     const priceInQuote = new BigNumber(1).dividedBy(priceInBase);
 
     return {
@@ -100,8 +90,7 @@ export class UniswapBot {
       priceInBase: priceInBase,
       priceInQuote: priceInQuote,
       sizeInBase: baseQuantity,
-      sizeInQuote: quoteQuantity,
-      exchangeAddress: exchangeAddress,
+      sizeInQuote: quoteQuantity.expectedRate.multipliedBy(baseQuantity.dividedBy(1e18)),
     } as PriceQueryResult;
   }
 
@@ -119,6 +108,6 @@ export class UniswapBot {
     );
 
     // instantiate the transaction object
-    return this.uniswapAdapterContract.takeOrder(this.account, orderArgs);
+    return this.kyberAdapterContract.takeOrder(this.account, orderArgs);
   }
 }
