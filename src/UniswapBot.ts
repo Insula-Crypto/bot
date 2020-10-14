@@ -24,8 +24,6 @@ interface PriceQueryResult {
   exchangeAddress: string;
 }
 
-
-
 export class UniswapBot {
   public static async create(hubAddress: string, tokenOneSymbol: string, tokenTwoSymbol: string) {
     const environment = createEnvironment();
@@ -72,30 +70,13 @@ export class UniswapBot {
     return true
   }
 
-  public async makeMeRich() {
-    // call the getFundHoldings method which returns an array of holdings.
-    const balances = await this.accountingContract.getFundHoldings();
-
-    // deduce holdings in each token your bot cares about
-    const tokenOneHolding =
-      balances.find((balance) => sameAddress(balance.address, this.tokenOne.address))?.amount || new BigNumber(0);
-
-    const tokenTwoHolding =
-      balances.find((balance) => sameAddress(balance.address, this.tokenTwo.address))?.amount || new BigNumber(0);
-
-    /**
-     * Specific to my strategy, where we are either long MLN or long ETH but never long both,
-     * baseCurrency is the currency with holdings, quote currency is the currency without.
-     * It will be the case that they're both non-zero only if the bot starts running
-     * with balances that it has not traded. In that case, I've set the token with the larger
-     * holding to be the base.
-     */
-    const baseCurrency = tokenOneHolding.isGreaterThan(tokenTwoHolding) ? this.tokenOne : this.tokenTwo;
-    const quoteCurrency = baseCurrency === this.tokenOne ? this.tokenTwo : this.tokenOne;
-    const baseQuantity = baseCurrency === this.tokenOne ? tokenOneHolding : tokenTwoHolding;
+  public async createTransaction(quantity: number) {
+    const baseCurrency = this.tokenTwo;
+    const quoteCurrency = this.tokenOne;
+    const baseQuantity = quantity;
 
     // pass them all to the getPrice function to see what the rates are
-    const priceObject = await this.getPrice(baseCurrency, quoteCurrency, baseQuantity);
+    const priceObject = await this.getPrice(baseCurrency, quoteCurrency, new BigNumber(baseQuantity));
 
     if (this.fortuneTeller(priceObject)) {
       return this.makeTransaction(priceObject);
@@ -137,7 +118,7 @@ export class UniswapBot {
 
   public async makeTransaction(priceInfo: PriceQueryResult){
     // adjust the target amount of token to buy
-    const slippage = 0.97;
+    const slippage = 0.01;
 
     // use the price query results to construct the uniswap order argument object
     const orderArgs = {
